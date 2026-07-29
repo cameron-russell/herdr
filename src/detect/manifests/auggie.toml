@@ -1,0 +1,77 @@
+id = "auggie"
+version = "2026.07.29.1"
+min_engine_version = 1
+updated_at = "2026-07-29T00:00:00Z"
+
+# Evidence: Auggie (Augment CLI) 0.33.0 live pane reads.
+#
+# Auggie sets an OSC 0 title, but it holds arbitrary task/summary text (the
+# prompt while working, a generated summary once done, "auggie" only at the
+# very first idle screen), so the title is NOT a reliable idle/working
+# discriminator. Detection anchors on screen chrome instead. Auggie does not
+# emit OSC 9;4 progress.
+#
+# Idle draws an input box with a "›" prompt and a persistent footer:
+#   " [INSERT] ? to show shortcuts                     [Opus 4.8]"
+# with the cwd on the row below. The footer is present in every state.
+#
+# Working draws a single status line just above the input box with a braille
+# spinner, activity text, an elapsed timer, and an interrupt hint:
+#   " ⠦ Sending request... (2s • esc to interrupt)"
+#   " ⠲ Processing response... (8s • esc to interrupt)"
+# While a turn runs the input box also shows a queued-input notice
+# ("Message will be queued and run after current task"). The "esc to
+# interrupt" hint is the invariant working marker.
+#
+# A tool permission prompt draws a boxed dialog with the title
+# "Tool Approval Required" and an action footer " [A]llow [D]eny". The
+# "esc to interrupt" hint is absent while blocked.
+
+[[rules]]
+id = "tool_approval_blocked"
+state = "blocked"
+priority = 1200
+region = "whole_recent"
+visible_blocker = true
+contains = ["tool approval required"]
+any = [
+  { contains = ["[a]llow", "[d]eny"] },
+  { contains = ["allow", "deny"] },
+]
+
+[[rules]]
+id = "approval_footer_blocked"
+state = "blocked"
+priority = 1180
+region = "bottom_non_empty_lines(3)"
+visible_blocker = true
+line_regex = ['(?i)^\s*\[a\]llow\s+\[d\]eny\s*$']
+
+[[rules]]
+id = "spinner_interrupt_working"
+state = "working"
+priority = 900
+region = "whole_recent"
+visible_working = true
+line_regex = ['^\s*[\x{2800}-\x{28FF}]\s.*\besc to interrupt\b']
+
+[[rules]]
+id = "interrupt_hint_working"
+state = "working"
+priority = 880
+region = "bottom_non_empty_lines(8)"
+visible_working = true
+contains = ["esc to interrupt"]
+
+[[rules]]
+id = "prompt_footer_idle"
+state = "idle"
+priority = 100
+region = "bottom_non_empty_lines(3)"
+visible_idle = true
+contains = ["? to show shortcuts"]
+not = [
+  { contains = ["esc to interrupt"] },
+  { contains = ["tool approval required"] },
+  { line_regex = ['(?i)^\s*\[a\]llow\s+\[d\]eny\s*$'] },
+]

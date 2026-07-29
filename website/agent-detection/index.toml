@@ -9,6 +9,10 @@ id = "agy"
 path = "antigravity.toml"
 
 [[agents]]
+id = "auggie"
+path = "auggie.toml"
+
+[[agents]]
 id = "claude"
 path = "claude.toml"
 

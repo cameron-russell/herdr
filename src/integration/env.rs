@@ -24,6 +24,9 @@ pub(crate) const GROK_CONFIG_DIR_ENV_VAR: &str = "GROK_CONFIG_DIR";
 /// `$GROK_HOME/config.toml` and `$GROK_HOME/auth.json`).
 pub(crate) const GROK_HOME_ENV_VAR: &str = "GROK_HOME";
 pub(crate) const HERMES_HOME_ENV_VAR: &str = "HERMES_HOME";
+/// Herdr-level override for the Augment CLI config dir (primarily a test
+/// seam); the auggie CLI does not honor it.
+pub(crate) const AUGMENT_CONFIG_DIR_ENV_VAR: &str = "AUGMENT_CONFIG_DIR";
 
 pub(crate) fn apply_pane_base_env(cmd: &mut CommandBuilder) {
     cmd.env(crate::api::SOCKET_PATH_ENV_VAR, crate::api::socket_path());
@@ -175,6 +178,12 @@ pub(crate) fn antigravity_cli_dir() -> io::Result<PathBuf> {
     // from ~/.gemini/config; ~/.gemini/antigravity-cli holds runtime data and
     // is never read for hooks.
     config_dir_from_env_or_home(ANTIGRAVITY_CLI_CONFIG_DIR_ENV_VAR, &[".gemini", "config"])
+}
+
+pub(crate) fn auggie_dir() -> io::Result<PathBuf> {
+    // AUGMENT_CONFIG_DIR is a herdr-level override only (primarily a test
+    // seam); the auggie CLI reads settings from ~/.augment.
+    config_dir_from_env_or_home(AUGMENT_CONFIG_DIR_ENV_VAR, &[".augment"])
 }
 
 pub(crate) fn grok_dir() -> io::Result<PathBuf> {

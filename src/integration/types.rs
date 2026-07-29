@@ -82,6 +82,20 @@ pub(crate) struct CursorInstallPaths {
 }
 
 #[derive(Debug)]
+pub(crate) struct AuggieInstallPaths {
+    pub hook_path: PathBuf,
+    pub settings_path: PathBuf,
+}
+
+#[derive(Debug)]
+pub(crate) struct AuggieUninstallResult {
+    pub hook_path: PathBuf,
+    pub settings_path: PathBuf,
+    pub removed_hook_file: bool,
+    pub updated_settings: bool,
+}
+
+#[derive(Debug)]
 pub(crate) struct CursorUninstallResult {
     pub hook_path: PathBuf,
     pub hooks_path: PathBuf,

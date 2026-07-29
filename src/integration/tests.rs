@@ -106,6 +106,7 @@ fn clear_integration_path_env() {
     std::env::remove_var(ANTIGRAVITY_CLI_CONFIG_DIR_ENV_VAR);
     std::env::remove_var(GROK_CONFIG_DIR_ENV_VAR);
     std::env::remove_var(GROK_HOME_ENV_VAR);
+    std::env::remove_var(AUGMENT_CONFIG_DIR_ENV_VAR);
 }
 
 fn kimi_hook_command(hook_path: &Path, action: &str) -> String {
@@ -2736,6 +2737,7 @@ fn bundled_integration_asset_versions_match_expected_versions() {
             MASTRACODE_HOOK_ASSET,
             MASTRACODE_INTEGRATION_VERSION,
         ),
+        ("auggie", AUGGIE_HOOK_ASSET, AUGGIE_INTEGRATION_VERSION),
     ] {
         assert_eq!(
             parse_integration_version(asset),
@@ -4155,6 +4157,182 @@ fn grok_dir_honors_grok_home_after_config_dir_seam() {
     );
 
     std::env::remove_var(GROK_HOME_ENV_VAR);
+    clear_integration_path_env();
+    let _ = fs::remove_dir_all(base);
+}
+
+fn auggie_session_command(settings: &Value) -> String {
+    settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        .as_str()
+        .expect("auggie SessionStart command")
+        .to_string()
+}
+
+#[test]
+fn install_auggie_writes_hook_and_updates_settings() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let auggie_dir = base.join(".augment");
+    fs::create_dir_all(&auggie_dir).unwrap();
+    fs::write(
+        auggie_dir.join("settings.json"),
+        r#"{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"echo keep-me"}]}]}}"#,
+    )
+    .unwrap();
+    std::env::set_var(AUGMENT_CONFIG_DIR_ENV_VAR, &auggie_dir);
+
+    let installed = install_auggie().unwrap();
+
+    assert_eq!(
+        installed.hook_path,
+        auggie_dir.join(AUGGIE_HOOK_INSTALL_NAME)
+    );
+    assert_eq!(installed.settings_path, auggie_dir.join("settings.json"));
+    assert_eq!(
+        fs::read_to_string(&installed.hook_path).unwrap(),
+        AUGGIE_HOOK_ASSET
+    );
+
+    let settings: Value =
+        serde_json::from_str(&fs::read_to_string(&installed.settings_path).unwrap()).unwrap();
+    let session_start = settings["hooks"]["SessionStart"].as_array().unwrap();
+    assert_eq!(session_start.len(), 1);
+    let command = auggie_session_command(&settings);
+    assert!(command.contains("herdr-agent-state"));
+    assert!(command.ends_with(" session"));
+    // Auggie reads the timeout in milliseconds; a small value would abort the
+    // hook before it can report the session.
+    assert_eq!(
+        settings["hooks"]["SessionStart"][0]["hooks"][0]["timeout"].as_u64(),
+        Some(AUGGIE_HOOK_TIMEOUT_MS)
+    );
+    // A user-configured hook for a different event is preserved.
+    assert!(settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        .as_str()
+        .is_some_and(|command| command == "echo keep-me"));
+
+    std::env::remove_var(AUGMENT_CONFIG_DIR_ENV_VAR);
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn install_auggie_creates_config_dir_when_missing() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let auggie_dir = base.join(".augment");
+    std::env::set_var(AUGMENT_CONFIG_DIR_ENV_VAR, &auggie_dir);
+
+    let installed = install_auggie().unwrap();
+
+    assert!(auggie_dir.is_dir());
+    assert!(installed.hook_path.is_file());
+    assert!(installed.settings_path.is_file());
+
+    std::env::remove_var(AUGMENT_CONFIG_DIR_ENV_VAR);
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn install_auggie_is_idempotent_for_hook_entries() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let auggie_dir = base.join(".augment");
+    fs::create_dir_all(&auggie_dir).unwrap();
+    std::env::set_var(AUGMENT_CONFIG_DIR_ENV_VAR, &auggie_dir);
+
+    install_auggie().unwrap();
+    install_auggie().unwrap();
+
+    let settings: Value =
+        serde_json::from_str(&fs::read_to_string(auggie_dir.join("settings.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        settings["hooks"]["SessionStart"].as_array().unwrap().len(),
+        1
+    );
+
+    std::env::remove_var(AUGMENT_CONFIG_DIR_ENV_VAR);
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn uninstall_auggie_removes_herdr_hooks_and_preserves_others() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let auggie_dir = base.join(".augment");
+    fs::create_dir_all(&auggie_dir).unwrap();
+    std::env::set_var(AUGMENT_CONFIG_DIR_ENV_VAR, &auggie_dir);
+
+    install_auggie().unwrap();
+    let mut settings: Value =
+        serde_json::from_str(&fs::read_to_string(auggie_dir.join("settings.json")).unwrap())
+            .unwrap();
+    settings["hooks"]["PreToolUse"] = json!([{
+        "hooks": [{"type": "command", "command": "echo user-defined"}]
+    }]);
+    fs::write(
+        auggie_dir.join("settings.json"),
+        serde_json::to_string_pretty(&settings).unwrap(),
+    )
+    .unwrap();
+
+    let result = uninstall_auggie().unwrap();
+    assert!(result.removed_hook_file);
+    assert!(result.updated_settings);
+    assert!(!auggie_dir.join(AUGGIE_HOOK_INSTALL_NAME).is_file());
+
+    let settings: Value =
+        serde_json::from_str(&fs::read_to_string(auggie_dir.join("settings.json")).unwrap())
+            .unwrap();
+    let hooks = settings.get("hooks").and_then(Value::as_object).unwrap();
+    assert!(!hooks.contains_key("SessionStart"));
+    assert!(hooks.contains_key("PreToolUse"));
+
+    // Uninstalling again is a no-op for the hook file.
+    let again = uninstall_auggie().unwrap();
+    assert!(!again.removed_hook_file);
+
+    std::env::remove_var(AUGMENT_CONFIG_DIR_ENV_VAR);
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn install_auggie_uses_augment_config_dir_env() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let auggie_dir = base.join("custom-augment");
+    fs::create_dir_all(&auggie_dir).unwrap();
+    std::env::set_var(AUGMENT_CONFIG_DIR_ENV_VAR, &auggie_dir);
+
+    let installed = install_auggie().unwrap();
+
+    assert_eq!(
+        installed.hook_path,
+        auggie_dir.join(AUGGIE_HOOK_INSTALL_NAME)
+    );
+    assert_eq!(installed.settings_path, auggie_dir.join("settings.json"));
+
+    clear_integration_path_env();
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn auggie_v1_integration_status_is_current() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let auggie_dir = base.join(".augment");
+    fs::create_dir_all(&auggie_dir).unwrap();
+    std::env::set_var(AUGMENT_CONFIG_DIR_ENV_VAR, &auggie_dir);
+    install_auggie().unwrap();
+
+    let statuses = installed_integration_statuses();
+    let auggie = statuses
+        .iter()
+        .find(|status| status.target == crate::api::schema::IntegrationTarget::Auggie)
+        .expect("auggie integration status");
+    assert_eq!(auggie.state, IntegrationStatusKind::Current);
+    assert_eq!(auggie.installed_version, Some(AUGGIE_INTEGRATION_VERSION));
+
     clear_integration_path_env();
     let _ = fs::remove_dir_all(base);
 }

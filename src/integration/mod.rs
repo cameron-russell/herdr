@@ -294,6 +294,21 @@ const GROK_HOOK_ASSET: &str = if cfg!(windows) {
     include_str!("assets/grok/herdr-agent-state.sh")
 };
 const GROK_INTEGRATION_VERSION: u32 = 1;
+const AUGGIE_HOOK_INSTALL_NAME: &str = if cfg!(windows) {
+    "herdr-agent-state.ps1"
+} else {
+    "herdr-agent-state.sh"
+};
+const AUGGIE_HOOK_ASSET: &str = if cfg!(windows) {
+    include_str!("assets/auggie/herdr-agent-state.ps1")
+} else {
+    include_str!("assets/auggie/herdr-agent-state.sh")
+};
+const AUGGIE_INTEGRATION_VERSION: u32 = 1;
+// Auggie reads the hook `timeout` field in milliseconds (default 60000ms), so a
+// bare `10` would abort the hook after 10ms before it can report the session.
+const AUGGIE_HOOK_TIMEOUT_MS: u64 = 10_000;
+const AUGGIE_HOOK_EVENTS: [(&str, &str); 1] = [("SessionStart", "session")];
 
 pub(crate) const INSTALL_WARNING_PREFIX: &str = "warning:";
 
